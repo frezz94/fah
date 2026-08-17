@@ -1,0 +1,131 @@
+"""
+Bot Discord "Supporteur" - SANS ngrok / SANS serveur public
+=============================================================
+Ce bot génère un code unique par utilisateur et l'écrit directement
+dans une DataStore Roblox via l'API officielle de Roblox (Open Cloud).
+Ton jeu Roblox lit ensuite cette DataStore normalement, comme il le
+fait déjà pour tes autres codes/cash. Pas besoin de ngrok, pas besoin
+d'exposer ton PC sur internet.
+
+------------------------------------------------------------------
+INSTALLATION (une seule fois, dans un terminal) :
+    pip install discord.py requests
+
+CONFIGURATION (à remplir juste en dessous) :
+    - DISCORD_TOKEN   : le token de ton bot Discord
+    - ROBLOX_API_KEY  : la clé Open Cloud créée sur create.roblox.com/dashboard/credentials
+    - UNIVERSE_ID     : l'ID de ton univers Roblox
+
+LANCEMENT :
+    python bot.py
+------------------------------------------------------------------
+"""
+
+import json
+import os
+import secrets
+
+import discord
+import requests
+from discord.ext import commands
+
+# ============ CONFIGURATION À MODIFIER ============
+DISCORD_TOKEN = "MTUzNzgzOTIzNTk1NDkwMTA2NA.GkkLev.zQ_ck1d-Wo1GYCsyP2cpq_-bTuFS3KOOceBTZ8"
+ROBLOX_API_KEY = "r5If0TUV8k6PiwQrK5vpwrt5CFwr2dVY9ZeV5luAHbOlgmLiZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNkluTnBaeTB5TURJeExUQTNMVEV6VkRFNE9qVXhPalE1V2lJc0luUjVjQ0k2SWtwWFZDSjkuZXlKaGRXUWlPaUpTYjJKc2IzaEpiblJsY201aGJDSXNJbWx6Y3lJNklrTnNiM1ZrUVhWMGFHVnVkR2xqWVhScGIyNVRaWEoyYVdObElpd2lZbUZ6WlVGd2FVdGxlU0k2SW5JMVNXWXdWRlZXT0dzMlVHbDNVWEpMTlhad2QzSjBOVU5HZDNJeVpGWlpPVnBsVmpWc2RVRklZazlzWjIxTWFTSXNJbTkzYm1WeVNXUWlPaUkyTlRReE5qVTFNakVpTENKbGVIQWlPakUzT0RZNU5qRTFOak1zSW1saGRDSTZNVGM0TmprMU56azJNeXdpYm1KbUlqb3hOemcyT1RVM09UWXpmUS5nTUFteml2WG9YLTQzMExCZ3hJTXdyRDNtaENjQjZNUTdUTk1VV0NzMDRQRmtNaklhZ2REWVJvb2l5bS1qOU9INklhbVRfUHpzb1RabzU4VHViMHpURFF5TS1TX1MxQVRLaWdrYVQ3eWxycTRSZWs3RnZzRVZNRnYzaEp0MnpyMWR6TDk3VjNkWnFWcjBwSHhwTTNJeGNXSk9hT3hiaVloZUJoWlJ3eE9vcnNRSFZzaVpMNVY1UFd3QlE5ODhNZm80WjhwRE4zS0czdGgyNmdJNFhEaUtDTjZleGt4aU5SOXF2NmcwTk5FRUY2YkY0LXRuMlVvNDhEcE0xUzhEaWE4NjVLNEhYcGFNMDFWck5sQ1pFWGlZZ2RYeTBhWFpUeUZUZHd5N2dTVEhQbmRra1JiZE8yUWNSZFJ2NEtjclNIZzFnSzd2aUZkSmxYaF9SaEhmaWFLZHc="
+UNIVERSE_ID = 10696840924  # remplace 0 par ton Universe ID (nombre)
+DATASTORE_NAME = "PendingCodes"
+
+# Le fichier de suivi local est toujours créé à côté de bot.py,
+# peu importe le dossier depuis lequel tu lances la commande.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOCAL_TRACKING_FILE = os.path.join(SCRIPT_DIR, "codes_locaux.json")
+# ====================================================
+
+ROBLOX_API_URL = (
+    f"https://apis.roblox.com/datastores/v1/universes/{UNIVERSE_ID}"
+    f"/standard-datastores/datastore/entries/entry"
+)
+
+
+def load_local():
+    if not os.path.exists(LOCAL_TRACKING_FILE):
+        return {}
+    with open(LOCAL_TRACKING_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_local(data):
+    with open(LOCAL_TRACKING_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def generate_code():
+    return str(secrets.randbelow(900000) + 100000)  # nombre à 6 chiffres, ex: 483920
+
+
+def write_code_to_roblox(code):
+    """Écrit le code dans la DataStore Roblox 'PendingCodes' via Open Cloud."""
+    response = requests.post(
+        ROBLOX_API_URL,
+        params={"datastoreName": DATASTORE_NAME, "entryKey": code},
+        headers={
+            "x-api-key": ROBLOX_API_KEY,
+            "content-type": "application/json",
+        },
+        json={"redeemed": False},
+        timeout=10,
+    )
+    if response.status_code not in (200, 201):
+        print(f"[Roblox API] Erreur {response.status_code}: {response.text}")
+    return response.status_code in (200, 201)
+
+
+# ================= BOT DISCORD =================
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+
+@bot.event
+async def on_ready():
+    print(f"Bot connecté en tant que {bot.user}")
+
+
+@bot.command(name="code")
+async def code_cmd(ctx):
+    """!code -> génère un code unique et l'envoie en MP."""
+    local = load_local()
+
+    # Si la personne a déjà un code non confirmé comme utilisé, on le renvoie
+    for c, info in local.items():
+        if info["discord_id"] == ctx.author.id:
+            await ctx.author.send(
+                f"Tu as déjà reçu ton code : `{c}`\nVa le rédemer dans le jeu !"
+            )
+            return
+
+    new_code = generate_code()
+
+    written = write_code_to_roblox(new_code)
+    if not written:
+        await ctx.reply(
+            "Erreur : je n'ai pas réussi à créer le code sur Roblox. "
+            "Vérifie ta clé API et ton Universe ID dans bot.py."
+        )
+        return
+
+    local[new_code] = {"discord_id": ctx.author.id}
+    save_local(local)
+
+    try:
+        await ctx.author.send(
+            f"Voici ton code unique : `{new_code}`\n"
+            f"Rentre-le dans le jeu pour débloquer le tag **Supporteur** !"
+        )
+        await ctx.message.add_reaction("✅")
+    except discord.Forbidden:
+        await ctx.reply("Je n'arrive pas à t'envoyer de message privé, active les MP !")
+
+
+if __name__ == "__main__":
+    bot.run(DISCORD_TOKEN)
