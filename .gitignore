@@ -1,0 +1,4 @@
+.env
+codes_locaux.json
+__pycache__/
+*.pyc
